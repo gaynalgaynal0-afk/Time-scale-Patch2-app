@@ -1,0 +1,54 @@
+Write a single complete bash script that builds an Android video patcher app from scratch on a Linux machine and produces a signed release APK. Follow every detail exactly:
+Project identity
+Package name: com.example.videopatcher, app label: Video Patcher
+Directory root: current directory; Java source under app/src/main/java/com/example/videopatcher
+Android SDK setup
+Download commandlinetools-linux-10406996_latest.zip from Google, unzip, rename inner folder to latest, place at $HOME/android-sdk/cmdline-tools/latest
+Set ANDROID_HOME=$HOME/android-sdk, update PATH, write local.properties
+Accept all licenses silently; install exactly: platforms;android-34, build-tools;34.0.0, platform-tools
+Root Gradle files
+settings.gradle: include ':app' only
+gradle.properties: enable AndroidX and Jetifier
+build.gradle: classpath com.android.tools.build:gradle:8.2.0
+app/build.gradle
+compileSdk 34, minSdk 24, targetSdk 34, versionCode 1, versionName "1.0"
+Release signing config: keystore file ../my-release-key.jks, storePassword and keyPassword both mypassword123, alias my-key-alias
+minifyEnabled false
+Dependencies: appcompat:1.6.1, material:1.10.0, constraintlayout:2.1.4, cardview:1.0.0
+Keystore
+Generate with keytool: RSA 2048, 10000 days, alias my-key-alias, storepass/keypass mypassword123, dname CN=VideoPatcher, OU=ID, O=Example, L=City, S=State, C=US; suppress errors with || true
+AndroidManifest.xml
+Permissions: READ_EXTERNAL_STORAGE with maxSdkVersion="32", READ_MEDIA_VIDEO, INTERNET, WRITE_EXTERNAL_STORAGE with maxSdkVersion="29"
+Application: label Video Patcher, requestLegacyExternalStorage=true, usesCleartextTraffic=true, icons @mipmap/ic_launcher and @mipmap/ic_launcher_round, theme @style/Theme.VideoPatcher
+MainActivity: exported=true, is the MAIN/LAUNCHER
+Colors (colors.xml): primary #E53935, primary_dark #B71C1C, accent #E53935, bg_dark #0A0A0A, surface_dark #111111, card_dark #1A1A1A, text_light #FFFFFF, text_secondary #9E9E9E
+Theme (themes.xml): Theme.VideoPatcher extending Theme.MaterialComponents.DayNight.NoActionBar, sets colorPrimary, colorPrimaryDark, colorAccent, statusBarColor #000000, windowBackground #0A0A0A
+Layout: activity_main.xml
+Root LinearLayout vertical, background #0A0A0A
+TabLayout id tabLayout at top: background #111111, tabTextColor #888888, tabSelectedTextColor #FFFFFF, tabIndicatorColor #E53935, height 3dp
+Tab 1 content: ScrollView id tab1Content, visibility visible by default, contains vertical LinearLayout padding 24dp with: TextView title "FPS Video Patcher" 24sp bold white marginTop 24dp; TextView subtitle "Converts 120fps/240fps videos to 60fps" 14sp #9E9E9E marginBottom 32dp; Button id pickVideoBtn "📁 Pick Video" match_parent 56dp outlined style backgroundTint #1A1A1A marginBottom 12dp; TextView id selectedFileText "No file selected" centered 13sp #9E9E9E padding 12dp background #111111 marginBottom 24dp; Button id patchBtn "⚡ Patch Video" match_parent 56dp bold white backgroundTint #E53935 marginBottom 16dp; ProgressBar id patchProgress match_parent height wrap_content gone marginBottom 16dp; TextView id statusText "Ready" centered 14sp #9E9E9E marginBottom 24dp; Button id downloadBtn "⬇ Download Patched Video" match_parent 56dp bold white backgroundTint #1B5E20 gone
+Tab 2 content: FrameLayout id tab2Content match_parent visibility gone containing WebView id tiktokWebView match_parent
+MainActivity.java
+Fields: PICK_VIDEO_REQUEST=1, PERMISSION_REQUEST=100, WORKER_URL="https://restless-star-a7e9.gaynalgaynal4.workers.dev/", selectedVideoPath (String), patchedVideoUrl (String)
+All tab 1 and tab 2 views as fields
+setupTabs(): add two tabs "🎬 Patcher" and "📤 TikTok Uploader"; OnTabSelectedListener toggles tab1Content VISIBLE/GONE and tab2Content GONE/VISIBLE
+setupTab1(): patchBtn starts disabled, downloadBtn starts GONE; pickVideoBtn calls openFilePicker(); patchBtn calls uploadAndPatch(selectedVideoPath); downloadBtn opens patchedVideoUrl via ACTION_VIEW Intent
+setupTab2(): enable JavaScript, DOM storage, wide viewport; set mobile Chrome user agent string; set WebViewClient with onPageFinished: if URL contains "tiktokstudio" or "tiktok.com/upload" call injectExtensionJS(); load URL "https://www.tiktok.com/tiktokstudio/upload"
+injectExtensionJS(): evaluateJavascript injects the following logic: guard window.__app_sys_active; sysState active=true; processData function that: if post_common_info.post_type === 2 set to 3; delete vedit_segment_info from single_post_req_list items; return JSON.stringify if changed else null; Proxy window.fetch to intercept URLs containing "project/post", parse body, call processData, replace body if changed
+openFilePicker(): ACTION_GET_CONTENT intent type "video/*" with CATEGORY_OPENABLE, startActivityForResult with PICK_VIDEO_REQUEST
+onActivityResult(): on PICK_VIDEO_REQUEST + RESULT_OK: get URI, call getRealPathFromUri; if path not null set selectedVideoPath, show filename in selectedFileText, enable patchBtn, set statusText "Ready to patch", hide downloadBtn; else fallback to URI.toString() as selectedVideoPath
+uploadAndPatch(String videoPath): run in new Thread; disable patchBtn, hide downloadBtn, show patchProgress, set statusText "Uploading video..."; create File from videoPath, check exists else show error and return; open HttpURLConnection POST to WORKER_URL with Content-Type multipart/form-data boundary; setConnectTimeout 30000, setReadTimeout 120000; write multipart part name="video" filename=videoFile.getName() Content-Type video/mp4; stream file bytes in 4096 buffer, track uploadedBytes/totalBytes, runOnUiThread to update patchProgress percent and statusText "Uploading... N%"; close boundary; runOnUiThread statusText "Patching video..."; read responseCode: if 200 read response string, parse download URL by looking for "url" key in JSON or raw http string, runOnUiThread: hide patchProgress, if downloadUrl not null set patchedVideoUrl show downloadBtn set statusText "✅ Patched! Ready to download." else show raw response, re-enable patchBtn; else show "Server error: N"; catch Exception show error message
+getRealPathFromUri(Uri): query MediaStore.Video.Media.DATA column, return path string or null on failure
+requestPermissions(): API 33+ request READ_MEDIA_VIDEO else READ_EXTERNAL_STORAGE, code PERMISSION_REQUEST
+onBackPressed(): if tiktokWebView visible and canGoBack() call goBack() else super
+Icons
+ic_launcher_background.xml: shape, solid #E53935
+ic_launcher_foreground.xml: vector 108×108dp, viewport 24×24, white fill, path M8,5v14l11,-7z
+ic_launcher.xml (mipmap-anydpi-v26): adaptive-icon with background and foreground refs
+Copy ic_launcher.xml → ic_launcher_round.xml
+Gradle wrapper
+Download gradle-8.2-bin.zip from https://services.gradle.org/distributions/
+Unzip with sudo to /opt/gradle
+Run /opt/gradle/gradle-8.2/bin/gradle wrapper --gradle-version 8.2
+chmod +x gradlew
+Final build: ./gradlew clean assembleRelease
